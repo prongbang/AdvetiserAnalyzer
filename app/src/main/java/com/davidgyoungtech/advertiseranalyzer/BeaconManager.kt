@@ -72,7 +72,6 @@ class BeaconManager(private val context: Context) {
 	private val bleScannerCallback = object : ScanCallback() {
 		override fun onScanResult(callbackType: Int, result: ScanResult?) {
 			super.onScanResult(callbackType, result)
-//			if (result?.rssi?.let { it > -45 } == true) {
 			if (result?.rssi != null) {
 
 				val deviceLe = BluetoothLeDevice(
@@ -90,7 +89,7 @@ class BeaconManager(private val context: Context) {
 					Log.i(TAG, "Bluetooth: ${deviceLe.name}")
 				}
 
-				result.scanRecord?.getManufacturerSpecificData(0x004c)
+				result.scanRecord?.getManufacturerSpecificData(0x004c) // 76
 						?.let { manData ->
 
 							val deviceBLe = BluetoothLeDevice(
@@ -109,12 +108,17 @@ class BeaconManager(private val context: Context) {
 									0,
 									0, // miner
 									0,
-									0 // Tx Power
+									(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) result.txPower else result.scanRecord?.txPowerLevel
+											?: 0).toByte() // Tx Power
 							)
 							if (newManufacturerData.size > 20) {
 								val uuid = calculateUuidString(
 										newManufacturerData.copyOfRange(4, 20))
-								Log.v(TAG, "uuid: $uuid")
+								Log.v(TAG, "uuid: ${uuid.toUpperCase(Locale.ENGLISH)}")
+								sendMessage("uuid: ${uuid.toUpperCase(Locale.ENGLISH)}",
+										"uuid: ${uuid.toUpperCase(Locale.ENGLISH)}")
+								// A2CBD1CC-E9D4-441A-91D4-8C6EE9695E06 <- advertment
+								// A2CBD1CC-E9D4-441A-91D4-8C6EE9695E06 <- uuid
 							}
 							Log.v(TAG, "manData(${manData.size}): ${Arrays.toString(manData)}")
 							Log.v(TAG, "manufacturerData(${manufacturerData.size}): ${
@@ -127,6 +131,9 @@ class BeaconManager(private val context: Context) {
 							val companyIdentidier = ByteUtils.getIntFrom2ByteArray(intArray)
 							val iBeaconAdvertisment = ByteUtils.getIntFrom2ByteArray(
 									Arrays.copyOfRange(manufacturerData, 2, 4))
+							val companyIdentidiers = longToUInt32ByteArray(
+									companyIdentidier.toLong())
+							Log.v(TAG, "companyIdentidier: ${Arrays.toString(companyIdentidiers)}")
 							Log.v(TAG, "companyIdentidier: $companyIdentidier")
 							Log.v(TAG, "iBeaconAdvertisment: $iBeaconAdvertisment")
 
@@ -149,7 +156,8 @@ class BeaconManager(private val context: Context) {
 							if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 								Log.i(TAG,
 										"rssi: ${result.rssi}\ndevice: ${result.device.address}\nuuids: ${result.scanRecord?.serviceUuids}\ntxPower: ${result.txPower}")
-								sendMessage(result.device.address + "-overflow-area-1", "rssi: ${result.rssi}\ndevice: ${result.device.address}\nuuids: ${result.scanRecord?.serviceUuids}\ntxPower: ${result.txPower}")
+								sendMessage(result.device.address + "-overflow-area-1",
+										"rssi: ${result.rssi}\ndevice: ${result.device.address}\nuuids: ${result.scanRecord?.serviceUuids}\ntxPower: ${result.txPower}\n")
 								sendMessage(result.device.address + "-overflow-area-2", "$result")
 							} else {
 								Log.i(TAG,
@@ -167,8 +175,8 @@ class BeaconManager(private val context: Context) {
 									if (byteAsUnsignedInt < 0) {
 										byteAsUnsignedInt += 256
 									}
-									val binaryString = String.format("%8s", Integer.toBinaryString(
-											byteAsUnsignedInt))
+									val binaryString = String.format("%8s",
+											Integer.toBinaryString(byteAsUnsignedInt))
 											.replace(" ", "0")
 									bytesAsBinary += binaryString
 									bytesAsBinaryFormatted += "$binaryString "
@@ -179,6 +187,11 @@ class BeaconManager(private val context: Context) {
 									Log.e(TAG, "Two bits set")
 									sendMessage("bitsset", "Two bits set")
 								}
+								// iOS Advertisement
+								// 10000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 01011010 01011001 00000010 00000111 00000000 10000010 00000000 00000000
+								// Android Scanner
+								// 10000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 01011010 01011001 00000010 00000111 00000000 10000010 00000000 00000000
+								Log.v(TAG, "binary: $bytesAsBinaryFormatted")
 								if (lastBinaryString != bytesAsBinary) {
 									if (lastBinaryString != "") {
 										if (System.currentTimeMillis() - lastChangeDetectionTime > 1700) {
@@ -209,8 +222,7 @@ class BeaconManager(private val context: Context) {
 									}
 									services.add(calculatedServiceUuid)
 									val appleBitFor = "iOS bit for $calculatedServiceUuid is ${
-										String.format(
-												"%3d", firstBitSet)
+										String.format("%3d", firstBitSet)
 									}: $bytesAsBinaryFormatted"
 									val found = "Found ${servicesForBitPosition.count()} of 128"
 									Log.d(TAG, appleBitFor)
@@ -271,6 +283,14 @@ class BeaconManager(private val context: Context) {
 		onMessage?.invoke(uuid, message)
 	}
 
+	fun longToUInt32ByteArray(value: Long): ByteArray {
+		val bytes = ByteArray(4)
+		bytes[3] = (value and 0xFFFF).toByte()
+		bytes[2] = ((value ushr 8) and 0xFFFF).toByte()
+		bytes[1] = ((value ushr 16) and 0xFFFF).toByte()
+		bytes[0] = ((value ushr 24) and 0xFFFF).toByte()
+		return bytes
+	}
 
 	fun calculateUuidString(uuid: ByteArray): String {
 		val sb = StringBuilder()
